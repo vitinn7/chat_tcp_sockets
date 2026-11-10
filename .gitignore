@@ -1,3 +1,5 @@
 chat_server
 chat_client
 *.o
+resultados/
+__pycache__/

@@ -69,6 +69,28 @@ Código de saída: `0` = medição válida, `2` = inválida (um cliente parou an
 
 Cada cliente imprime no stderr: `cliente,<nome>,<bytes_enviados>,<segundos>`.
 
+## Scripts do experimento
+
+A pasta `scripts/` automatiza a bateria usada no relatório.
+
+- `run_experimento.sh`: roda 10 repetições para cada N de 1 a 10, em ordem intercalada. Reinicia o servidor a cada execução, refaz as inválidas (até 3 vezes) e grava `resultados/<ambiente>/<data>/resultados.csv`.
+- `analisar.py`: lê os CSVs e gera as tabelas (máximo, média, desvio-padrão, IC95, Jain) e os gráficos. Precisa de `python3` e `matplotlib`.
+
+```bash
+make
+scripts/run_experimento.sh local                  # tudo no mesmo PC (usa 127.0.0.2)
+python3 scripts/analisar.py resultados/local/*/resultados.csv
+```
+
+Em dois computadores, compile nos dois e rode primeiro o lado servidor. O lado clientes comanda a sequência pela porta de controle 5001:
+
+```bash
+scripts/run_experimento.sh servidor                # no PC servidor
+scripts/run_experimento.sh clientes 192.168.0.14   # no PC dos clientes (IP do servidor)
+```
+
+As portas 5000 e 5001 precisam estar liberadas no PC servidor. Para ver as opções (duração, repetições, bloco, portas), use `scripts/run_experimento.sh -h`.
+
 ## Como a taxa é calculada
 
 Cada *thread* do servidor soma os bytes recebidos num contador próprio (atômico, sem mutex). Uma *thread* de medição lê a soma de todos os contadores em dois instantes:
