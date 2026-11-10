@@ -23,7 +23,8 @@
 #include <netinet/in.h>
 
 #define TAM_BUFFER 1024
-#define TEMPO_LIMITE_S 10
+#define TEMPO_LIMITE_S 10   /* connect, send e espera do fechamento */
+#define ESPERA_GO_S 30      /* maximo esperando o "GO" */
 #define NS_POR_S 1000000000LL
 
 int sock;
@@ -141,6 +142,13 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    /* No Linux, SO_SNDTIMEO tambem limita o connect */
+    struct timeval limite = { TEMPO_LIMITE_S, 0 };
+
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
+                   &limite, sizeof(limite)) == -1)
+        perror("setsockopt");
+
     memset(&endereco_servidor, 0, sizeof(endereco_servidor));
     endereco_servidor.sin_family = AF_INET;
     endereco_servidor.sin_port = htons((uint16_t)porta);
@@ -167,7 +175,13 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* Espera o "GO" para comecar */
+    /* Espera o "GO" para comecar, sem ficar preso se ele nao vier */
+    struct timeval espera_go = { ESPERA_GO_S, 0 };
+
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
+                   &espera_go, sizeof(espera_go)) == -1)
+        perror("setsockopt");
+
     ssize_t n = ler_linha(sock, buffer, sizeof(buffer));
 
     if (n <= 0 || strcmp(buffer, "GO") != 0) {
@@ -188,13 +202,6 @@ int main(int argc, char *argv[]) {
     }
 
     memset(bloco, 'x', (size_t)tam_bloco);
-
-    /* Evita ficar preso num send se o servidor parar de ler */
-    struct timeval limite = { TEMPO_LIMITE_S, 0 };
-
-    if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
-                   &limite, sizeof(limite)) == -1)
-        perror("setsockopt");
 
     /* Envia o bloco em laco ate o prazo, sem printf aqui dentro */
     uint64_t total_enviado = 0;

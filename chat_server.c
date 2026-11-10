@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <stdatomic.h>
 #include <time.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -30,6 +31,7 @@
 #define MAX_CLIENTES 100
 #define TAM_RECV 65536
 #define ESPERA_FIM_S 5
+#define ESPERA_ACCEPT_S 30  /* maximo sem novo cliente antes de desistir */
 #define NS_POR_S 1000000000LL
 
 typedef struct Cliente {
@@ -152,21 +154,15 @@ ssize_t ler_linha(int fd, char *buffer, size_t capacidade) {
     return (ssize_t)pos;
 }
 
-/* Manda a mensagem para todos menos o remetente (aqui so o "GO") */
-void enviar_para_todos(const char *mensagem, Cliente *remetente) {
+/* Manda a mensagem para todos os clientes registrados (aqui so o "GO") */
+void enviar_para_todos(const char *mensagem) {
     pthread_mutex_lock(&mutex_clientes);
 
     Cliente *atual = clientes;
 
     while (atual != NULL) {
-        if (atual != remetente) {
-            if (enviar_tudo(atual->fd, mensagem,
-                            strlen(mensagem)) == -1) {
-                fprintf(stderr,
-                        "Falha ao enviar para %s.\n",
-                        atual->nome);
-            }
-        }
+        if (enviar_tudo(atual->fd, mensagem, strlen(mensagem)) == -1)
+            fprintf(stderr, "Falha ao enviar para %s.\n", atual->nome);
 
         atual = atual->prox;
     }
@@ -238,7 +234,7 @@ void *atender_cliente(void *arg) {
 
     /* O ultimo a chegar libera todos com o "GO" */
     if (ultimo) {
-        enviar_para_todos("GO\n", NULL);
+        enviar_para_todos("GO\n");
 
         pthread_mutex_lock(&mutex_clientes);
         t_go_ns = agora_ns();
@@ -466,6 +462,23 @@ int main(int argc, char *argv[]) {
     while (aceitos < n_esperados) {
         struct sockaddr_in endereco_cliente;
         socklen_t tam_endereco = sizeof(endereco_cliente);
+
+        /* poll em vez de SO_RCVTIMEO: este e herdado pelos sockets aceitos */
+        struct pollfd espera = { sock_servidor, POLLIN, 0 };
+        int pronto = poll(&espera, 1, ESPERA_ACCEPT_S * 1000);
+
+        if (pronto == -1 && errno == EINTR)
+            continue;
+
+        if (pronto == 0) {
+            fprintf(stderr, "Chegaram so %d de %d cliente(s) em %d s; "
+                    "execucao abortada.\n", aceitos, n_esperados,
+                    ESPERA_ACCEPT_S);
+            close(sock_servidor);
+            forcar_encerramento(todos, aceitos);
+            esperar_threads(threads, todos, aceitos);
+            return EXIT_FAILURE;
+        }
 
         int sock_cliente = accept(
             sock_servidor,
